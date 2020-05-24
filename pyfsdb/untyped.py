@@ -189,3 +189,14 @@ class UntypedStore:
 
         self._lock(key, run_f)
 
+    def get_descendant_store(self, descendant_key: Key) -> "UntypedStore":
+        if len(descendant_key) <= 0:
+            return self
+        return UntypedStore(self.base_dir, self.base_key + descendant_key)
+
+    def get_ancestor_store(self, level: int = 1):
+        if level <= 0:
+            return self
+        if level >= len(self.base_key):
+            level = len(self.base_key)
+        return UntypedStore(self.base_dir, self.base_key[:-level])
