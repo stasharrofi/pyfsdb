@@ -1,2 +1,2 @@
 # pyfsdb
-A Python-native simple key/value store on top of the file system
+A Python-native hierarchical key/value store on top of the file system
