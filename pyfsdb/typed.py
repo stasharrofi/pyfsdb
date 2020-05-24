@@ -73,3 +73,9 @@ class TypedStore(Generic[T]):
 
         return self.underlying.lock_and_run(key, run_f)
 
+
+    def get_descendant_store(self, descendant_key: Key) -> "TypedStore"[T]:
+        return TypedStore(self.underlying.get_descendant_store(descendant_key), self.t_decoder, self.t_encoder)
+
+    def get_ancestor_store(self, level: int = 1) -> "TypedStore"[T]:
+        return TypedStore(self.underlying.get_ancestor_store(level), self.t_decoder, self.t_encoder)
