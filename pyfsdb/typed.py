@@ -9,8 +9,8 @@ from typing import Tuple
 from typing import TypeVar
 
 from pytyped.macros.boxed import Boxed
-from pytyped_json.decoder import JsonDecoder
-from pytyped_json.encoder import JsonEncoder
+from pytyped.json.decoder import JsonDecoder
+from pytyped.json.encoder import JsonEncoder
 
 from pyfsdb.untyped import Key
 from pyfsdb.untyped import UntypedStore

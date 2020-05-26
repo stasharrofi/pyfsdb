@@ -9,6 +9,7 @@ verify_ssl = true
 pytyped-stasharrofi = {editable = true,path = "/home/shahab/Repos/pytyped"}
 dataclasses = "*"
 pytz = "*"
+mypy = "*"
 
 [requires]
 python_version = "3.6"

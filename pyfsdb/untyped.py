@@ -11,10 +11,10 @@ from typing import Optional
 from typing import Tuple
 from typing import TypeVar
 
-from pytyped_json.decoder import AutoJsonDecoder
-from pytyped_json.decoder import JsonDecoder
-from pytyped_json.encoder import AutoJsonEncoder
-from pytyped_json.encoder import JsonEncoder
+from pytyped.json.decoder import AutoJsonDecoder
+from pytyped.json.decoder import JsonDecoder
+from pytyped.json.encoder import AutoJsonEncoder
+from pytyped.json.encoder import JsonEncoder
 
 Key = List[str]  # Each string should only use base64 chars, i.e., `A`-`Z`, `a`-`z`, `0`-`9`, `+`, or `/`
 Value = bytes
