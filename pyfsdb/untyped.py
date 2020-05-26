@@ -184,8 +184,19 @@ class UntypedStore:
     # raises an exception if `key` is locked.
     def lock_and_run(self, key: Key, f: Callable[[Optional[Value]], A]) -> A:
         def run_f(data_file_name: str) -> A:
-            data = pathlib.Path(data_file_name).read_bytes()
+            data = self._read_data(data_file_name)
             return f(data)
+
+        self._lock(key, run_f)
+
+    # f is expected to return a potentially new value (to update key) plus the result of function
+    def lock_and_transform(self, key: Key, f: Callable[[Optional[Value]], Tuple[Optional[Value], A]]):
+        def run_f(data_file_name: str) -> A:
+            data = self._read_data(data_file_name)
+            (maybe_new_value, result) = f(data)
+            if maybe_new_value is not None:
+                self._write_data(data_file_name, maybe_new_value)
+            return result
 
         self._lock(key, run_f)
 

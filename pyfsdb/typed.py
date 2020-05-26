@@ -8,6 +8,7 @@ from typing import Optional
 from typing import Tuple
 from typing import TypeVar
 
+from pytyped.macros.boxed import Boxed
 from pytyped_json.decoder import JsonDecoder
 from pytyped_json.encoder import JsonEncoder
 
@@ -73,6 +74,17 @@ class TypedStore(Generic[T]):
 
         return self.underlying.lock_and_run(key, run_f)
 
+    def lock_and_transform(self, key: Key, f: Callable[[Optional[GetResult[T]]], Tuple[Optional[Boxed[T]], A]]) -> A:
+        def run_f(value: Optional[Value]) -> Tuple[Optional[Value], A]:
+            if value is None:
+                return f(None)
+            (maybe_new_data, result) = f(GetResult(value, self._decode(value)))
+            encoded_new_data: Optional[Value] = None
+            if maybe_new_data is not None:
+                encoded_new_data = self._encode(maybe_new_data.t)
+            return encoded_new_data, result
+
+        return self.underlying.lock_and_transform(key, run_f)
 
     def get_descendant_store(self, descendant_key: Key) -> "TypedStore"[T]:
         return TypedStore(self.underlying.get_descendant_store(descendant_key), self.t_decoder, self.t_encoder)
