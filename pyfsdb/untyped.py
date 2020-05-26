@@ -76,7 +76,7 @@ class UntypedStore:
         if len(full_key) == 0 or not UntypedStore._is_base64_char_only(full_key):
             raise InvalidKeyException(full_key)
         last_index = len(full_key) - 1
-        converted = [s.replace("/", "-") + (".d" if i < last_index else "") for s, i in enumerate(full_key)]
+        converted = [s.replace("/", "-") + (".d" if i < last_index else "") for i, s in enumerate(full_key)]
         return self._get_data_dir() + "/".join(converted)
 
     def _get_data_file_name(self, key: Key) -> str:
@@ -99,7 +99,10 @@ class UntypedStore:
 
     # raises an exception if `key` is locked.
     def put(self, key: Key, value: Value) -> None:
-        self._lock(key, lambda data_file_name: UntypedStore._write_data(data_file_name, value))
+        def write_to_file(data_file_name: str) -> None:
+            UntypedStore._write_data(data_file_name, value)
+
+        self._lock(key, write_to_file)
 
     # The scan method does not lock anything and it is only guaranteed to work as expected if no other process changes
     # the state of the database while a scan is going on.
