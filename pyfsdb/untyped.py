@@ -5,7 +5,7 @@ import pathlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
-from typing import Generator
+from typing import Iterator
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -109,7 +109,7 @@ class UntypedStore:
     # If the state of the database changes in between, the scanner method may return key-value pairs that no longer
     # exist or it may skips key-value pairs that are generated and/or updated in the meantime.
     # The returned keys are partial meaning that the base_key of the current instance of UntypedStore is removed.
-    def prefix_scan(self, key_prefix: Key) -> Generator[Tuple[Key, Value]]:
+    def prefix_scan(self, key_prefix: Key) -> Iterator[Tuple[Key, Value]]:
         base_dir: str
         if len(self.base_key) <= 0:
             base_dir = self.base_dir
@@ -164,7 +164,7 @@ class UntypedStore:
 
         try:
             base_dir = pathlib.Path(base_file_name).parts[:-1]
-            pathlib.Path(base_dir).mkdir(parents=True, exist_ok=True)
+            pathlib.Path("/".join(base_dir)).mkdir(parents=True, exist_ok=True)
 
             flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
             file_handle = os.open(lock_file_name, flags)
@@ -190,10 +190,10 @@ class UntypedStore:
             data = self._read_data(data_file_name)
             return f(data)
 
-        self._lock(key, run_f)
+        return self._lock(key, run_f)
 
     # f is expected to return a potentially new value (to update key) plus the result of function
-    def lock_and_transform(self, key: Key, f: Callable[[Optional[Value]], Tuple[Optional[Value], A]]):
+    def lock_and_transform(self, key: Key, f: Callable[[Optional[Value]], Tuple[Optional[Value], A]]) -> A:
         def run_f(data_file_name: str) -> A:
             data = self._read_data(data_file_name)
             (maybe_new_value, result) = f(data)
@@ -201,7 +201,7 @@ class UntypedStore:
                 self._write_data(data_file_name, maybe_new_value)
             return result
 
-        self._lock(key, run_f)
+        return self._lock(key, run_f)
 
     def get_descendant_store(self, descendant_key: Key) -> "UntypedStore":
         if len(descendant_key) <= 0:

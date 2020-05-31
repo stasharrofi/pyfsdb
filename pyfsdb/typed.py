@@ -2,8 +2,8 @@ import json
 
 from dataclasses import dataclass
 from typing import Callable
-from typing import Generator
 from typing import Generic
+from typing import Iterator
 from typing import Optional
 from typing import Tuple
 from typing import TypeVar
@@ -55,8 +55,8 @@ class TypedStore(Generic[T]):
     # If the state of the database changes in between, the scanner method may return key-value pairs that no longer
     # exist or it may skips key-value pairs that are generated and/or updated in the meantime.
     # The returned keys are partial meaning that the base_key of the current instance of UntypedStore is removed.
-    def prefix_scan(self, key_prefix: Key) -> Generator[Tuple[Key, T]]:
-        for key, value in self.prefix_scan(key_prefix):
+    def prefix_scan(self, key_prefix: Key) -> Iterator[Tuple[Key, T]]:
+        for key, value in self.underlying.prefix_scan(key_prefix):
             yield key, self._decode(value)
 
     # raises an exception if `key` is locked.
@@ -76,9 +76,11 @@ class TypedStore(Generic[T]):
 
     def lock_and_transform(self, key: Key, f: Callable[[Optional[GetResult[T]]], Tuple[Optional[Boxed[T]], A]]) -> A:
         def run_f(value: Optional[Value]) -> Tuple[Optional[Value], A]:
-            if value is None:
-                return f(None)
-            (maybe_new_data, result) = f(GetResult(value, self._decode(value)))
+            maybe_decoded_value: Optional[GetResult[T]] = None
+            if value is not None:
+                maybe_decoded_value = GetResult(value, self._decode(value))
+            (maybe_new_data, result) = f(maybe_decoded_value)
+
             encoded_new_data: Optional[Value] = None
             if maybe_new_data is not None:
                 encoded_new_data = self._encode(maybe_new_data.t)
