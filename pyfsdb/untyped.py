@@ -174,7 +174,7 @@ class UntypedStore:
             try:
                 os.close(file_handle)
 
-                lock_file = open(lock_file_name)
+                lock_file = open(lock_file_name, 'w')
                 lock_file.write(json.dumps(_lock_encoder.write(lock)))
                 lock_file.flush()
                 os.fsync(lock_file.fileno())
