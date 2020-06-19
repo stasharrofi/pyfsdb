@@ -90,10 +90,21 @@ class UnitCombinator(Generic[T], CombinatorStore[Key, T, Value]):
     def put(self, key: Key, value: T, retry_strategy: Optional[RetryStrategy] = None) -> None:
         self.underlying.put(key, value, retry_strategy)
 
-    def compare_and_put(self, key: Key, expected: Optional[Value], new: T, retry_strategy: Optional[RetryStrategy] = None) -> bool:
+    def compare_and_put(
+        self,
+        key: Key,
+        expected: Optional[Value],
+        new: T,
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> bool:
         return self.underlying.compare_and_put(key, expected, new, retry_strategy)
 
-    def lock_and_run(self, key: Key, f: Callable[[Optional[CombinatorResult[Value, T]]], A], retry_strategy: Optional[RetryStrategy] = None) -> A:
+    def lock_and_run(
+        self,
+        key: Key,
+        f: Callable[[Optional[CombinatorResult[Value, T]]], A],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         def run_f(maybe_value: Optional[GetResult[T]]) -> A:
             if maybe_value is None:
                 return f(None)
@@ -134,7 +145,13 @@ class PairCombinator(CombinatorStore[Tuple[K1, K2], Tuple[T1, T2], Tuple[G1, G2]
     def put(self, key: Tuple[K1, K2], value: Tuple[T1, T2], retry_strategy: Optional[RetryStrategy] = None) -> None:
         self.lock_and_transform(key, lambda x: (Boxed(value), None), retry_strategy)
 
-    def compare_and_put(self, key: Tuple[K1, K2], expected: Optional[Tuple[G1, G2]], new: Tuple[T1, T2], retry_strategy: Optional[RetryStrategy] = None) -> bool:
+    def compare_and_put(
+        self,
+        key: Tuple[K1, K2],
+        expected: Optional[Tuple[G1, G2]],
+        new: Tuple[T1, T2],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> bool:
         def cap(
             x: Optional[CombinatorResult[Tuple[G1, G2], Tuple[T1, T2]]]
         ) -> Tuple[Optional[Boxed[Tuple[T1, T2]]], bool]:
@@ -218,7 +235,13 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
             raise ListCombinatorLengthError("Different number of keys (%d) from values (%d)." % (len(key), len(value)))
         self.lock_and_transform(key, lambda x: (Boxed(value), None), retry_strategy)
 
-    def compare_and_put(self, key: List[K], expected: Optional[List[G]], new: List[T], retry_strategy: Optional[RetryStrategy] = None) -> bool:
+    def compare_and_put(
+        self,
+        key: List[K],
+        expected: Optional[List[G]],
+        new: List[T],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> bool:
         def cap(x: Optional[CombinatorResult[List[G], List[T]]]) -> Tuple[Optional[Boxed[List[T]]], bool]:
             if x is None and expected is None:
                 return Boxed(new), True
@@ -238,16 +261,18 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
             )
         return self.lock_and_transform(key, cap, retry_strategy)
 
-    def lock_and_run(self, key: List[K], f: Callable[[Optional[CombinatorResult[List[G], List[T]]]], A], retry_strategy: Optional[RetryStrategy] = None) -> A:
+    def lock_and_run(
+        self,
+        key: List[K],
+        f: Callable[[Optional[CombinatorResult[List[G], List[T]]]], A],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         return self.lock_and_transform(key, lambda x: (None, f(x)), retry_strategy)
 
     def lock_and_transform(
         self,
         key: List[K],
-        f: Callable[
-            [Optional[CombinatorResult[List[G], List[T]]]],
-            Tuple[Optional[Boxed[List[T]]], A]
-        ],
+        f: Callable[[Optional[CombinatorResult[List[G], List[T]]]], Tuple[Optional[Boxed[List[T]]], A]],
         retry_strategy: Optional[RetryStrategy] = None
     ) -> A:
         def run_f(
