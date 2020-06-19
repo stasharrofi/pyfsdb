@@ -13,6 +13,7 @@ from pytyped.macros.boxed import Boxed
 from pyfsdb.typed import GetResult
 from pyfsdb.typed import TypedStore
 from pyfsdb.untyped import Key
+from pyfsdb.untyped import RetryStrategy
 from pyfsdb.untyped import Value
 
 A = TypeVar("A")
@@ -40,23 +41,39 @@ class CombinatorStore(Generic[K, T, G], metaclass=ABCMeta):
 
     # raises an exception if `key` is locked.
     @abstractmethod
-    def put(self, key: K, value: T) -> None:
+    def put(self, key: K, value: T, retry_strategy: Optional[RetryStrategy] = None) -> None:
         pass
 
     # raises an exception if `key` is locked.
     # returns false if the value did not match the expected value
     # returns true if everything went well.
     @abstractmethod
-    def compare_and_put(self, key: K, expected: Optional[G], new: T) -> bool:
+    def compare_and_put(
+        self,
+        key: K,
+        expected: Optional[G],
+        new: T,
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> bool:
         pass
 
     # raises an exception if `key` is locked.
     @abstractmethod
-    def lock_and_run(self, key: K, f: Callable[[Optional[CombinatorResult[G, T]]], A]) -> A:
+    def lock_and_run(
+        self,
+        key: K,
+        f: Callable[[Optional[CombinatorResult[G, T]]], A],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         pass
 
     @abstractmethod
-    def lock_and_transform(self, key: K, f: Callable[[Optional[CombinatorResult[G, T]]], Tuple[Optional[Boxed[T]], A]]) -> A:
+    def lock_and_transform(
+        self,
+        key: K,
+        f: Callable[[Optional[CombinatorResult[G, T]]], Tuple[Optional[Boxed[T]], A]],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         pass
 
 
@@ -70,31 +87,32 @@ class UnitCombinator(Generic[T], CombinatorStore[Key, T, Value]):
             return None
         return CombinatorResult(r.exact, r.value)
 
-    def put(self, key: Key, value: T) -> None:
-        self.underlying.put(key, value)
+    def put(self, key: Key, value: T, retry_strategy: Optional[RetryStrategy] = None) -> None:
+        self.underlying.put(key, value, retry_strategy)
 
-    def compare_and_put(self, key: Key, expected: Optional[Value], new: T) -> bool:
-        return self.underlying.compare_and_put(key, expected, new)
+    def compare_and_put(self, key: Key, expected: Optional[Value], new: T, retry_strategy: Optional[RetryStrategy] = None) -> bool:
+        return self.underlying.compare_and_put(key, expected, new, retry_strategy)
 
-    def lock_and_run(self, key: Key, f: Callable[[Optional[CombinatorResult[Value, T]]], A]) -> A:
+    def lock_and_run(self, key: Key, f: Callable[[Optional[CombinatorResult[Value, T]]], A], retry_strategy: Optional[RetryStrategy] = None) -> A:
         def run_f(maybe_value: Optional[GetResult[T]]) -> A:
             if maybe_value is None:
                 return f(None)
             return f(CombinatorResult(maybe_value.exact, maybe_value.value))
 
-        return self.underlying.lock_and_run(key, run_f)
+        return self.underlying.lock_and_run(key, run_f, retry_strategy)
 
     def lock_and_transform(
         self,
         key: Key,
-        f: Callable[[Optional[CombinatorResult[Value, T]]], Tuple[Optional[Boxed[T]], A]]
+        f: Callable[[Optional[CombinatorResult[Value, T]]], Tuple[Optional[Boxed[T]], A]],
+        retry_strategy: Optional[RetryStrategy] = None
     ) -> A:
         def run_f(maybe_value: Optional[GetResult[T]]) -> Tuple[Optional[Boxed[T]], A]:
             if maybe_value is None:
                 return f(None)
             return f(CombinatorResult(maybe_value.exact, maybe_value.value))
 
-        return self.underlying.lock_and_transform(key, run_f)
+        return self.underlying.lock_and_transform(key, run_f, retry_strategy)
 
 
 @dataclass
@@ -113,10 +131,10 @@ class PairCombinator(CombinatorStore[Tuple[K1, K2], Tuple[T1, T2], Tuple[G1, G2]
             value=(r1.value, r2.value)
         )
 
-    def put(self, key: Tuple[K1, K2], value: Tuple[T1, T2]) -> None:
-        self.lock_and_transform(key, lambda x: (Boxed(value), None))
+    def put(self, key: Tuple[K1, K2], value: Tuple[T1, T2], retry_strategy: Optional[RetryStrategy] = None) -> None:
+        self.lock_and_transform(key, lambda x: (Boxed(value), None), retry_strategy)
 
-    def compare_and_put(self, key: Tuple[K1, K2], expected: Optional[Tuple[G1, G2]], new: Tuple[T1, T2]) -> bool:
+    def compare_and_put(self, key: Tuple[K1, K2], expected: Optional[Tuple[G1, G2]], new: Tuple[T1, T2], retry_strategy: Optional[RetryStrategy] = None) -> bool:
         def cap(
             x: Optional[CombinatorResult[Tuple[G1, G2], Tuple[T1, T2]]]
         ) -> Tuple[Optional[Boxed[Tuple[T1, T2]]], bool]:
@@ -128,14 +146,15 @@ class PairCombinator(CombinatorStore[Tuple[K1, K2], Tuple[T1, T2], Tuple[G1, G2]
                 return Boxed(new), True
             return None, False
 
-        return self.lock_and_transform(key, cap)
+        return self.lock_and_transform(key, cap, retry_strategy)
 
     def lock_and_run(
         self,
         key: Tuple[K1, K2],
-        f: Callable[[Optional[CombinatorResult[Tuple[G1, G2], Tuple[T1, T2]]]], A]
+        f: Callable[[Optional[CombinatorResult[Tuple[G1, G2], Tuple[T1, T2]]]], A],
+        retry_strategy: Optional[RetryStrategy] = None
     ) -> A:
-        return self.lock_and_transform(key, lambda x: (None, f(x)))
+        return self.lock_and_transform(key, lambda x: (None, f(x)), retry_strategy)
 
     def lock_and_transform(
         self,
@@ -143,7 +162,8 @@ class PairCombinator(CombinatorStore[Tuple[K1, K2], Tuple[T1, T2], Tuple[G1, G2]
         f: Callable[
             [Optional[CombinatorResult[Tuple[G1, G2], Tuple[T1, T2]]]],
             Tuple[Optional[Boxed[Tuple[T1, T2]]], A]
-        ]
+        ],
+        retry_strategy: Optional[RetryStrategy] = None
     ) -> A:
         def run_f(
             r1: Optional[CombinatorResult[G1, T1]],
@@ -163,7 +183,15 @@ class PairCombinator(CombinatorStore[Tuple[K1, K2], Tuple[T1, T2], Tuple[G1, G2]
             return Boxed(new_t2), (Boxed(new_t1), result)
 
         key1, key2 = key
-        return self.fst.lock_and_transform(key1, lambda r1: self.snd.lock_and_transform(key2, lambda r2: run_f(r1, r2)))
+        return self.fst.lock_and_transform(
+            key1,
+            lambda r1: self.snd.lock_and_transform(
+                key2,
+                lambda r2: run_f(r1, r2),
+                retry_strategy
+            ),
+            retry_strategy
+        )
 
 
 @dataclass
@@ -185,12 +213,12 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
             result.value.append(r.value)
         return result
 
-    def put(self, key: List[K], value: List[T]) -> None:
+    def put(self, key: List[K], value: List[T], retry_strategy: Optional[RetryStrategy] = None) -> None:
         if len(key) != len(value):
             raise ListCombinatorLengthError("Different number of keys (%d) from values (%d)." % (len(key), len(value)))
-        self.lock_and_transform(key, lambda x: (Boxed(value), None))
+        self.lock_and_transform(key, lambda x: (Boxed(value), None), retry_strategy)
 
-    def compare_and_put(self, key: List[K], expected: Optional[List[G]], new: List[T]) -> bool:
+    def compare_and_put(self, key: List[K], expected: Optional[List[G]], new: List[T], retry_strategy: Optional[RetryStrategy] = None) -> bool:
         def cap(x: Optional[CombinatorResult[List[G], List[T]]]) -> Tuple[Optional[Boxed[List[T]]], bool]:
             if x is None and expected is None:
                 return Boxed(new), True
@@ -208,10 +236,10 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
             raise ListCombinatorLengthError(
                 "Different number of keys (%d) from expected values (%d)." % (len(key), len(expected))
             )
-        return self.lock_and_transform(key, cap)
+        return self.lock_and_transform(key, cap, retry_strategy)
 
-    def lock_and_run(self, key: List[K], f: Callable[[Optional[CombinatorResult[List[G], List[T]]]], A]) -> A:
-        return self.lock_and_transform(key, lambda x: (None, f(x)))
+    def lock_and_run(self, key: List[K], f: Callable[[Optional[CombinatorResult[List[G], List[T]]]], A], retry_strategy: Optional[RetryStrategy] = None) -> A:
+        return self.lock_and_transform(key, lambda x: (None, f(x)), retry_strategy)
 
     def lock_and_transform(
         self,
@@ -219,7 +247,8 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
         f: Callable[
             [Optional[CombinatorResult[List[G], List[T]]]],
             Tuple[Optional[Boxed[List[T]]], A]
-        ]
+        ],
+        retry_strategy: Optional[RetryStrategy] = None
     ) -> A:
         def run_f(
             index: int,
@@ -230,7 +259,8 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
             if index < len(key):
                 updates, result = self.element_store.lock_and_transform(
                     key=key[index],
-                    f=lambda r: run_f(index + 1, prev_values, r)
+                    f=lambda r: run_f(index + 1, prev_values, r),
+                    retry_strategy=retry_strategy
                 )
                 return updates[index - 1], (updates, result)
             else:
@@ -266,5 +296,5 @@ class ListCombinator(CombinatorStore[List[K], List[T], List[G]], Generic[K, T, G
         if len(key) <= 0:
             _, result = f(CombinatorResult([], []))
         else:
-            _, result = self.element_store.lock_and_transform(key[0], lambda r: run_f(1, [], r))
+            _, result = self.element_store.lock_and_transform(key[0], lambda r: run_f(1, [], r), retry_strategy)
         return result

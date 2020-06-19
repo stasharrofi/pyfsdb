@@ -4,6 +4,8 @@ import pathlib
 
 from dataclasses import dataclass
 from datetime import datetime
+from random import random
+from time import sleep
 from typing import Callable
 from typing import Iterator
 from typing import List
@@ -44,6 +46,21 @@ class Lock:
     created_at: datetime
 
 
+@dataclass
+class RetryStrategy:
+    max_retries: int = 0
+    initial_backoff_seconds: float = 0.1
+
+    additive_increase: float = 0.0
+    multiplicative_increase: float = 0.0
+
+    min_jitter_additive: float = 0.0
+    min_jitter_multiplicative: float = 0.0
+
+    max_jitter_additive: float = 0.0
+    max_jitter_multiplicative: float = 0.0
+
+
 _auto_json_encoder: AutoJsonEncoder = AutoJsonEncoder()
 _lock_encoder: JsonEncoder[Lock] = _auto_json_encoder.extract(Lock)
 
@@ -55,6 +72,7 @@ _lock_decoder: JsonDecoder[Lock] = _auto_json_decoder.extract(Lock)
 class UntypedStore:
     base_dir: str
     base_key: Key
+    retry_strategy: RetryStrategy = RetryStrategy()
 
     @staticmethod
     def _is_base64_char_only(key: Key) -> bool:
@@ -98,11 +116,13 @@ class UntypedStore:
         return UntypedStore._read_data(self._get_data_file_name(key))
 
     # raises an exception if `key` is locked.
-    def put(self, key: Key, value: Value) -> None:
+    def put(self, key: Key, value: Value, retry_strategy: Optional[RetryStrategy] = None) -> None:
         def write_to_file(data_file_name: str) -> None:
             UntypedStore._write_data(data_file_name, value)
 
-        self._lock(key, write_to_file)
+        if retry_strategy is None:
+            retry_strategy = self.retry_strategy
+        self._lock(key, write_to_file, retry_strategy)
 
     # The scan method does not lock anything and it is only guaranteed to work as expected if no other process changes
     # the state of the database while a scan is going on.
@@ -140,7 +160,13 @@ class UntypedStore:
     # raises an exception if `key` is locked.
     # returns false if the value did not match the expected value
     # returns true if everything went well.
-    def compare_and_put(self, key: Key, expected: Optional[Value], new: Value) -> bool:
+    def compare_and_put(
+        self,
+        key: Key,
+        expected: Optional[Value],
+        new: Value,
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> bool:
         def compare_contents(data_file_name: str) -> bool:
             existing_data = self._read_data(data_file_name)
             if existing_data == expected:
@@ -148,12 +174,14 @@ class UntypedStore:
                 return True
             return False
 
-        return self._lock(key, compare_contents)
+        if retry_strategy is None:
+            retry_strategy = self.retry_strategy
+        return self._lock(key, compare_contents, retry_strategy)
 
     # raises an exception if `key` is locked.
     # f is the function that is called with only parameter: the file that is guaranteed to be locked.
     # the file itself is not guaranteed to exist but the directory possibly containing that file is guaranteed to exist.
-    def _lock(self, key: Key, f: Callable[[str], A]) -> A:
+    def _lock(self, key: Key, f: Callable[[str], A], retry_strategy: RetryStrategy) -> A:
         lock = Lock(
             process_id=os.getpid(),
             created_at=datetime.utcnow()
@@ -162,38 +190,62 @@ class UntypedStore:
         base_file_name = self._get_path(key)
         lock_file_name = base_file_name + ".lock"
 
-        try:
-            base_dir = pathlib.Path(base_file_name).parts[:-1]
-            pathlib.Path("/".join(base_dir)).mkdir(parents=True, exist_ok=True)
-
-            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-            file_handle = os.open(lock_file_name, flags)
-        except FileExistsError:
-            raise LockNotObtainedException(key)
-        else:  # No exception, so the file must have been created successfully.
+        retry_count: int = retry_strategy.max_retries
+        backoff: float = retry_strategy.initial_backoff_seconds
+        while retry_count >= 0:
             try:
-                os.close(file_handle)
+                base_dir = pathlib.Path(base_file_name).parts[:-1]
+                pathlib.Path("/".join(base_dir)).mkdir(parents=True, exist_ok=True)
 
-                lock_file = open(lock_file_name, 'w')
-                lock_file.write(json.dumps(_lock_encoder.write(lock)))
-                lock_file.flush()
-                os.fsync(lock_file.fileno())
-                lock_file.close()
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                file_handle = os.open(lock_file_name, flags)
+            except FileExistsError:
+                if retry_count > 0:
+                    min_jitter = retry_strategy.min_jitter_multiplicative * backoff + retry_strategy.min_jitter_additive
+                    max_jitter = retry_strategy.max_jitter_multiplicative * backoff + retry_strategy.max_jitter_additive
+                    jitter = min_jitter + random() * (max_jitter - min_jitter)
+                    sleep(backoff + jitter)
+                    backoff += retry_strategy.multiplicative_increase * backoff + retry_strategy.additive_increase
 
-                return f(base_file_name + ".data")
-            finally:
-                os.remove(lock_file_name)
+                retry_count -= 1
+            else:  # No exception, so the file must have been created successfully.
+                try:
+                    os.close(file_handle)
+
+                    lock_file = open(lock_file_name, 'w')
+                    lock_file.write(json.dumps(_lock_encoder.write(lock)))
+                    lock_file.flush()
+                    os.fsync(lock_file.fileno())
+                    lock_file.close()
+
+                    return f(base_file_name + ".data")
+                finally:
+                    os.remove(lock_file_name)
+
+        raise LockNotObtainedException(key)
 
     # raises an exception if `key` is locked.
-    def lock_and_run(self, key: Key, f: Callable[[Optional[Value]], A]) -> A:
+    def lock_and_run(
+        self,
+        key: Key,
+        f: Callable[[Optional[Value]], A],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         def run_f(data_file_name: str) -> A:
             data = self._read_data(data_file_name)
             return f(data)
 
-        return self._lock(key, run_f)
+        if retry_strategy is None:
+            retry_strategy = self.retry_strategy
+        return self._lock(key, run_f, retry_strategy)
 
     # f is expected to return a potentially new value (to update key) plus the result of function
-    def lock_and_transform(self, key: Key, f: Callable[[Optional[Value]], Tuple[Optional[Value], A]]) -> A:
+    def lock_and_transform(
+        self,
+        key: Key,
+        f: Callable[[Optional[Value]], Tuple[Optional[Value], A]],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         def run_f(data_file_name: str) -> A:
             data = self._read_data(data_file_name)
             (maybe_new_value, result) = f(data)
@@ -201,7 +253,9 @@ class UntypedStore:
                 self._write_data(data_file_name, maybe_new_value)
             return result
 
-        return self._lock(key, run_f)
+        if retry_strategy is None:
+            retry_strategy = self.retry_strategy
+        return self._lock(key, run_f, retry_strategy)
 
     def get_descendant_store(self, descendant_key: Key) -> "UntypedStore":
         if len(descendant_key) <= 0:

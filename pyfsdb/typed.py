@@ -13,6 +13,7 @@ from pytyped.json.decoder import JsonDecoder
 from pytyped.json.encoder import JsonEncoder
 
 from pyfsdb.untyped import Key
+from pyfsdb.untyped import RetryStrategy
 from pyfsdb.untyped import UntypedStore
 from pyfsdb.untyped import Value
 
@@ -47,8 +48,8 @@ class TypedStore(Generic[T]):
         return GetResult(maybe_bytes, self._decode(maybe_bytes))
 
     # raises an exception if `key` is locked.
-    def put(self, key: Key, value: T) -> None:
-        self.underlying.put(key, self._encode(value))
+    def put(self, key: Key, value: T, retry_strategy: Optional[RetryStrategy] = None) -> None:
+        self.underlying.put(key, self._encode(value), retry_strategy)
 
     # The scan method does not lock anything and it is only guaranteed to work as expected if no other process changes
     # the state of the database while a scan is going on.
@@ -62,19 +63,35 @@ class TypedStore(Generic[T]):
     # raises an exception if `key` is locked.
     # returns false if the value did not match the expected value
     # returns true if everything went well.
-    def compare_and_put(self, key: Key, expected: Optional[Value], new: T) -> bool:
-        return self.underlying.compare_and_put(key, expected, self._encode(new))
+    def compare_and_put(
+        self,
+        key: Key,
+        expected: Optional[Value],
+        new: T,
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> bool:
+        return self.underlying.compare_and_put(key, expected, self._encode(new), retry_strategy)
 
     # raises an exception if `key` is locked.
-    def lock_and_run(self, key: Key, f: Callable[[Optional[GetResult[T]]], A]) -> A:
+    def lock_and_run(
+        self,
+        key: Key,
+        f: Callable[[Optional[GetResult[T]]], A],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         def run_f(value: Optional[Value]) -> A:
             if value is None:
                 return f(None)
             return f(GetResult(value, self._decode(value)))
 
-        return self.underlying.lock_and_run(key, run_f)
+        return self.underlying.lock_and_run(key, run_f, retry_strategy)
 
-    def lock_and_transform(self, key: Key, f: Callable[[Optional[GetResult[T]]], Tuple[Optional[Boxed[T]], A]]) -> A:
+    def lock_and_transform(
+        self,
+        key: Key,
+        f: Callable[[Optional[GetResult[T]]], Tuple[Optional[Boxed[T]], A]],
+        retry_strategy: Optional[RetryStrategy] = None
+    ) -> A:
         def run_f(value: Optional[Value]) -> Tuple[Optional[Value], A]:
             maybe_decoded_value: Optional[GetResult[T]] = None
             if value is not None:
@@ -86,7 +103,7 @@ class TypedStore(Generic[T]):
                 encoded_new_data = self._encode(maybe_new_data.t)
             return encoded_new_data, result
 
-        return self.underlying.lock_and_transform(key, run_f)
+        return self.underlying.lock_and_transform(key, run_f, retry_strategy)
 
     def get_descendant_store(self, descendant_key: Key) -> "TypedStore[T]":
         return TypedStore(self.underlying.get_descendant_store(descendant_key), self.t_decoder, self.t_encoder)
