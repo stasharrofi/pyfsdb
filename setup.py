@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pyfsdb-stasharrofi",
-    version="0.0.1",
+    version="0.0.2",
     author="Shahab Tasharrofi",
     author_email="shahab.tasharrofi@gmail.com",
     description="Simple hierarchical key/value store for Python",
