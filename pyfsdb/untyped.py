@@ -95,7 +95,7 @@ class UntypedStore:
         def compare_contents() -> bool:
             existing_data = self.fs.read_data(self.base_key + key)
             if existing_data == expected:
-                UntypedStore.fs.write_data(self.base_key + key, new)
+                self.fs.write_data(self.base_key + key, new)
                 return True
             return False
 

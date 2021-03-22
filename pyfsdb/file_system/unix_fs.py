@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -65,7 +66,7 @@ class UnixLikeFS(FileSystem):
             flattened_key = self.flatten_key(key)
             if flattened_key is None:
                 return None
-            data = pathlib.Path(flattened_key).read_bytes()
+            data = pathlib.Path(flattened_key + ".data").read_bytes()
             return data
         except FileNotFoundError:
             return None
@@ -74,7 +75,7 @@ class UnixLikeFS(FileSystem):
         flattened_key = self.flatten_key(key)
         if flattened_key is None:
             return None
-        pathlib.Path(flattened_key).write_bytes(contents)
+        pathlib.Path(flattened_key + ".data").write_bytes(contents)
 
     def prefix_scan(self, key_prefix: Key) -> Iterator[Tuple[Key, Value]]:
         base_dir = self.base_dir
